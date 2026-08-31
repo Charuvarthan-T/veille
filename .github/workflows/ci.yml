@@ -34,3 +34,6 @@ jobs:
 
       - name: Build
         run: go build -o bin/veille ./cmd/veille
+
+      - name: Build Docker image
+        run: docker build -t veille:ci .

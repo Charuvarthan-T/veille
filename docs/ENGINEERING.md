@@ -219,33 +219,40 @@ Configure environment:
 cp .env.example .env
 ```
 
-Fill in Twilio, WhatsApp, Resend, and email values in `.env`.
+Fill in required values in `.env`. For host-run development against Compose Postgres, use:
 
-Start PostgreSQL only (published on host port `5433` to avoid colliding with a local PostgreSQL on `5432`; the container still listens on `5432`, and the Compose app continues to use `db:5432`):
+```env
+DATABASE_URL=postgres://veille:veille@127.0.0.1:5433/veille?sslmode=disable
+```
+
+`.env` is gitignored and excluded from the Docker build context. It is never copied into the image. Compose injects it at container runtime via `env_file`.
+
+Start PostgreSQL only (published on host port `5433` to avoid colliding with a local PostgreSQL on `5432`; the container still listens on `5432`, and the Compose app overrides `DATABASE_URL` to `db:5432`):
 
 ```bash
 docker compose up -d db
 ```
 
-For host-run development, point `DATABASE_URL` at `127.0.0.1:5433` as shown in `.env.example`.
-
-Run the service (applies migrations on startup):
+Run the service on the host (applies migrations on startup):
 
 ```bash
 go run ./cmd/veille
 ```
 
-Or run app and database together after `.env` exists (Compose reads it for variable substitution):
+Or run app and database together (requires a filled `.env`):
 
 ```bash
 docker compose up --build
 ```
 
-PostgreSQL alone can start without `.env`:
+Build and run the image directly:
 
 ```bash
-docker compose up -d db
+docker build -t veille:local .
+docker run --rm --env-file .env veille:local
 ```
+
+This service is a background worker. It does not expose an HTTP port and does not bind to `0.0.0.0`.
 
 Tests:
 
@@ -260,13 +267,44 @@ gofmt -l .
 go vet ./...
 golangci-lint run ./...
 go build -o bin/veille ./cmd/veille
+docker build -t veille:ci .
 ```
 
-## 17. External credentials checklist
+## 17. Deployment notes (Docker / Render)
 
-Obtain and place these values in `.env` before real notifications will work:
+Production configuration must be supplied as runtime environment variables. The container entrypoint is `/app/veille`. Migrations live at `/app/migrations` and run on startup.
 
-- PostgreSQL connection string (`DATABASE_URL`), or use the Compose defaults
+Recommended Render service type: Background Worker (not a web service), because Veille has no HTTP listener.
+
+Required runtime environment variables:
+
+- `DATABASE_URL`
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_WHATSAPP_FROM`
+- `WHATSAPP_TO`
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
+- `EMAIL_TO`
+
+Optional with defaults:
+
+- `TIMEZONE` (default `Asia/Kolkata`)
+- `COLLECT_INTERVAL` (default `15m`)
+- `NOTIFY_INTERVAL` (default `1m`)
+- `REMINDER_LEAD` (default `24h`)
+- `REMINDER_WINDOW` (default `24h`)
+- `HTTP_TIMEOUT` (default `30s`)
+- `SHUTDOWN_TIMEOUT` (default `20s`)
+- `NOTIFICATION_MAX_ATTEMPTS` (default `5`)
+
+Cloud account setup, Render service creation, production database provisioning, DNS, and production secret entry are outside this repository and must be done manually.
+
+## 18. External credentials checklist
+
+Obtain and place these values in `.env` (local) or your host’s runtime environment (production) before real notifications will work:
+
+- PostgreSQL connection string (`DATABASE_URL`)
 - Twilio Account SID
 - Twilio Auth Token
 - Twilio WhatsApp sender address (`TWILIO_WHATSAPP_FROM`)
