@@ -111,24 +111,6 @@ RETURNING
 	return out, inserted, nil
 }
 
-func (d *DB) MarkMissingUpcoming(ctx context.Context, platform domain.Platform, seenExternalIDs []string, observedAt time.Time) error {
-	if len(seenExternalIDs) == 0 {
-		return nil
-	}
-	const query = `
-UPDATE contests
-SET last_seen_at = $2, updated_at = NOW()
-WHERE platform = $1
-  AND status = 'upcoming'
-  AND external_id = ANY($3)
-`
-	_, err := d.sql.ExecContext(ctx, query, platform, observedAt.UTC(), seenExternalIDs)
-	if err != nil {
-		return fmt.Errorf("touch seen contests: %w", err)
-	}
-	return nil
-}
-
 func (d *DB) GetContest(ctx context.Context, id int64) (domain.Contest, error) {
 	const query = `
 SELECT id, platform, external_id, name, url, start_time, end_time, duration_seconds,
@@ -163,53 +145,6 @@ WHERE id = $1
 	}
 	out.Duration = time.Duration(duration) * time.Second
 	return out, nil
-}
-
-func (d *DB) ListUpcomingBefore(ctx context.Context, before time.Time) ([]domain.Contest, error) {
-	const query = `
-SELECT id, platform, external_id, name, url, start_time, end_time, duration_seconds,
-       status, first_seen_at, last_seen_at, created_at, updated_at
-FROM contests
-WHERE status = 'upcoming'
-  AND start_time <= $1
-ORDER BY start_time ASC
-`
-	rows, err := d.sql.QueryContext(ctx, query, before.UTC())
-	if err != nil {
-		return nil, fmt.Errorf("list upcoming contests: %w", err)
-	}
-	defer rows.Close()
-
-	var contests []domain.Contest
-	for rows.Next() {
-		var (
-			c        domain.Contest
-			duration int64
-		)
-		if err := rows.Scan(
-			&c.ID,
-			&c.Platform,
-			&c.ExternalID,
-			&c.Name,
-			&c.URL,
-			&c.StartTime,
-			&c.EndTime,
-			&duration,
-			&c.Status,
-			&c.FirstSeenAt,
-			&c.LastSeenAt,
-			&c.CreatedAt,
-			&c.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan contest: %w", err)
-		}
-		c.Duration = time.Duration(duration) * time.Second
-		contests = append(contests, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate contests: %w", err)
-	}
-	return contests, nil
 }
 
 func (d *DB) EnsureReminder(ctx context.Context, contestID int64, channel domain.Channel, dueAt time.Time) error {
@@ -262,7 +197,7 @@ RETURNING n.id, n.contest_id, n.channel, n.kind, n.status, n.due_at, n.sent_at,
 	if err != nil {
 		return nil, fmt.Errorf("claim due notifications: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var items []domain.Notification
 	for rows.Next() {

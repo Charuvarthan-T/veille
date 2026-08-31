@@ -9,9 +9,7 @@ import (
 
 type ContestStore interface {
 	UpsertContest(ctx context.Context, contest domain.Contest) (domain.Contest, bool, error)
-	MarkMissingUpcoming(ctx context.Context, platform domain.Platform, seenExternalIDs []string, observedAt time.Time) error
 	GetContest(ctx context.Context, id int64) (domain.Contest, error)
-	ListUpcomingBefore(ctx context.Context, before time.Time) ([]domain.Contest, error)
 }
 
 type NotificationStore interface {
