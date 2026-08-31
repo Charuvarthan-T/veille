@@ -19,15 +19,15 @@ const (
 )
 
 type Contest struct {
-	ID         int64
-	Platform   Platform
-	ExternalID string
-	Name       string
-	URL        string
-	StartTime  time.Time
-	EndTime    time.Time
-	Duration   time.Duration
-	Status     ContestStatus
+	ID          int64
+	Platform    Platform
+	ExternalID  string
+	Name        string
+	URL         string
+	StartTime   time.Time
+	EndTime     time.Time
+	Duration    time.Duration
+	Status      ContestStatus
 	FirstSeenAt time.Time
 	LastSeenAt  time.Time
 	CreatedAt   time.Time

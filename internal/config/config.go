@@ -9,22 +9,22 @@ import (
 )
 
 type Config struct {
-	DatabaseURL            string
-	Timezone               string
-	CollectInterval        time.Duration
-	NotifyInterval         time.Duration
-	ReminderLead           time.Duration
-	ReminderWindow         time.Duration
-	HTTPTimeout            time.Duration
-	ShutdownTimeout        time.Duration
+	DatabaseURL             string
+	Timezone                string
+	CollectInterval         time.Duration
+	NotifyInterval          time.Duration
+	ReminderLead            time.Duration
+	ReminderWindow          time.Duration
+	HTTPTimeout             time.Duration
+	ShutdownTimeout         time.Duration
 	NotificationMaxAttempts int
-	TwilioAccountSID       string
-	TwilioAuthToken        string
-	TwilioWhatsAppFrom     string
-	WhatsAppTo             string
-	ResendAPIKey           string
-	EmailFrom              string
-	EmailTo                string
+	TwilioAccountSID        string
+	TwilioAuthToken         string
+	TwilioWhatsAppFrom      string
+	WhatsAppTo              string
+	ResendAPIKey            string
+	EmailFrom               string
+	EmailTo                 string
 }
 
 func Load() (Config, error) {
@@ -56,14 +56,14 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	var missing []string
 	required := map[string]string{
-		"DATABASE_URL":           c.DatabaseURL,
-		"TWILIO_ACCOUNT_SID":     c.TwilioAccountSID,
-		"TWILIO_AUTH_TOKEN":      c.TwilioAuthToken,
-		"TWILIO_WHATSAPP_FROM":   c.TwilioWhatsAppFrom,
-		"WHATSAPP_TO":            c.WhatsAppTo,
-		"RESEND_API_KEY":         c.ResendAPIKey,
-		"EMAIL_FROM":             c.EmailFrom,
-		"EMAIL_TO":               c.EmailTo,
+		"DATABASE_URL":         c.DatabaseURL,
+		"TWILIO_ACCOUNT_SID":   c.TwilioAccountSID,
+		"TWILIO_AUTH_TOKEN":    c.TwilioAuthToken,
+		"TWILIO_WHATSAPP_FROM": c.TwilioWhatsAppFrom,
+		"WHATSAPP_TO":          c.WhatsAppTo,
+		"RESEND_API_KEY":       c.ResendAPIKey,
+		"EMAIL_FROM":           c.EmailFrom,
+		"EMAIL_TO":             c.EmailTo,
 	}
 	for name, value := range required {
 		if value == "" {
