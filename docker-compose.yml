@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: veille
+      POSTGRES_USER: veille
+      POSTGRES_PASSWORD: veille
+    ports:
+      - "5432:5432"
+    volumes:
+      - veille_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veille -d veille"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://veille:veille@db:5432/veille?sslmode=disable
+    restart: unless-stopped
+
+volumes:
+  veille_pg:
