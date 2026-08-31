@@ -233,10 +233,16 @@ Run the service (applies migrations on startup):
 go run ./cmd/veille
 ```
 
-Or run app and database together:
+Or run app and database together after `.env` exists (Compose reads it for variable substitution):
 
 ```bash
 docker compose up --build
+```
+
+PostgreSQL alone can start without `.env`:
+
+```bash
+docker compose up -d db
 ```
 
 Tests:

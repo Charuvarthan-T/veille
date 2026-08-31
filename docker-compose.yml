@@ -20,10 +20,23 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    env_file:
-      - .env
     environment:
       DATABASE_URL: postgres://veille:veille@db:5432/veille?sslmode=disable
+      TIMEZONE: ${TIMEZONE:-Asia/Kolkata}
+      COLLECT_INTERVAL: ${COLLECT_INTERVAL:-15m}
+      NOTIFY_INTERVAL: ${NOTIFY_INTERVAL:-1m}
+      REMINDER_LEAD: ${REMINDER_LEAD:-24h}
+      REMINDER_WINDOW: ${REMINDER_WINDOW:-24h}
+      HTTP_TIMEOUT: ${HTTP_TIMEOUT:-30s}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-20s}
+      NOTIFICATION_MAX_ATTEMPTS: ${NOTIFICATION_MAX_ATTEMPTS:-5}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_WHATSAPP_FROM: ${TWILIO_WHATSAPP_FROM}
+      WHATSAPP_TO: ${WHATSAPP_TO}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      EMAIL_TO: ${EMAIL_TO}
     restart: unless-stopped
 
 volumes:
