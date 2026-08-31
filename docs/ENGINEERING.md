@@ -221,11 +221,13 @@ cp .env.example .env
 
 Fill in Twilio, WhatsApp, Resend, and email values in `.env`.
 
-Start PostgreSQL only:
+Start PostgreSQL only (published on host port `5433` to avoid colliding with a local PostgreSQL on `5432`; the container still listens on `5432`, and the Compose app continues to use `db:5432`):
 
 ```bash
 docker compose up -d db
 ```
+
+For host-run development, point `DATABASE_URL` at `127.0.0.1:5433` as shown in `.env.example`.
 
 Run the service (applies migrations on startup):
 

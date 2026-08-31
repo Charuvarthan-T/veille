@@ -47,7 +47,7 @@ func TestValidateRejectsInvalidTimezone(t *testing.T) {
 
 func setValidEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("DATABASE_URL", "postgres://veille:veille@localhost:5432/veille?sslmode=disable")
+	t.Setenv("DATABASE_URL", "postgres://veille:veille@127.0.0.1:5433/veille?sslmode=disable")
 	t.Setenv("TIMEZONE", "Asia/Kolkata")
 	t.Setenv("TWILIO_ACCOUNT_SID", "ACtest")
 	t.Setenv("TWILIO_AUTH_TOKEN", "token")
