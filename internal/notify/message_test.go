@@ -9,7 +9,7 @@ import (
 	"github.com/Charuvarthan-T/veille/internal/notify"
 )
 
-func TestBuildReminderMessageUsesConfiguredTimezone(t *testing.T) {
+func TestBuildActiveMessageUsesConfiguredTimezone(t *testing.T) {
 	loc, err := time.LoadLocation("Asia/Kolkata")
 	if err != nil {
 		t.Fatal(err)
@@ -23,11 +23,17 @@ func TestBuildReminderMessageUsesConfiguredTimezone(t *testing.T) {
 		Duration:  2 * time.Hour,
 	}
 
-	msg := notify.BuildReminderMessage(contest, loc)
+	msg := notify.BuildActiveMessage(contest, loc)
 	if msg.Subject == "" {
 		t.Fatal("expected subject")
 	}
+	if !strings.Contains(msg.Subject, "LIVE") {
+		t.Fatalf("subject = %q", msg.Subject)
+	}
 	if !strings.Contains(msg.Body, "20:05") {
 		t.Fatalf("expected Kolkata local time in body, got %q", msg.Body)
+	}
+	if !strings.Contains(msg.Body, "Join contest:") {
+		t.Fatalf("expected join URL in body, got %q", msg.Body)
 	}
 }

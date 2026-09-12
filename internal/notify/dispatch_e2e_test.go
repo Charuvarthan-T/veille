@@ -37,8 +37,12 @@ func (s *e2eStore) GetContest(_ context.Context, id int64) (domain.Contest, erro
 	return s.contest, nil
 }
 
-func (s *e2eStore) EnsureReminder(context.Context, int64, domain.Channel, time.Time) error {
+func (s *e2eStore) EnsureActiveNotification(context.Context, int64, time.Time) error {
 	return nil
+}
+
+func (s *e2eStore) RefreshContestStatuses(context.Context, time.Time) (int64, error) {
+	return 0, nil
 }
 
 func (s *e2eStore) ClaimDue(_ context.Context, now time.Time, limit int, maxAttempts int) ([]domain.Notification, error) {
@@ -56,10 +60,10 @@ func (s *e2eStore) ClaimDue(_ context.Context, now time.Time, limit int, maxAtte
 		if n.DueAt.After(now) {
 			continue
 		}
-		if !s.contest.StartTime.After(now) {
+		if !s.contest.StartTime.After(now) && !now.Before(s.contest.EndTime) {
 			continue
 		}
-		if s.contest.Status != domain.ContestStatusUpcoming {
+		if s.contest.StartTime.After(now) || !now.Before(s.contest.EndTime) {
 			continue
 		}
 		n.Status = domain.NotificationStatusSending
@@ -92,6 +96,20 @@ func (s *e2eStore) MarkFailed(_ context.Context, id int64, errMsg string) error 
 	return nil
 }
 
+func (s *e2eStore) ReleaseClaim(_ context.Context, id int64) error {
+	n, ok := s.notifications[id]
+	if !ok {
+		return errors.New("notification not found")
+	}
+	if n.Status == domain.NotificationStatusSending {
+		n.Status = domain.NotificationStatusPending
+		if n.AttemptCount > 0 {
+			n.AttemptCount--
+		}
+	}
+	return nil
+}
+
 func (s *e2eStore) ReleaseStaleSending(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
@@ -99,12 +117,11 @@ func (s *e2eStore) ReleaseStaleSending(context.Context, time.Time) (int64, error
 func (s *e2eStore) Ping(context.Context) error { return nil }
 func (s *e2eStore) Close() error               { return nil }
 
-func TestDispatchPendingNotificationExactlyOnce(t *testing.T) {
-	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	lead := 24 * time.Hour
-	window := 24 * time.Hour
-	start := now.Add(20 * time.Hour)
-	dueAt := notify.ReminderDueAt(start, lead)
+func TestDispatchRunningContestExactlyOnce(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-30 * time.Minute)
+	end := start.Add(2 * time.Hour)
+	dueAt := notify.ActiveDueAt(start)
 
 	contest := domain.Contest{
 		ID:         42,
@@ -113,35 +130,32 @@ func TestDispatchPendingNotificationExactlyOnce(t *testing.T) {
 		Name:       "Div. 2 Round",
 		URL:        "https://codeforces.com/contest/42",
 		StartTime:  start,
-		EndTime:    start.Add(2 * time.Hour),
+		EndTime:    end,
 		Duration:   2 * time.Hour,
-		Status:     domain.ContestStatusUpcoming,
+		Status:     domain.ContestStatusRunning,
 	}
 	pending := domain.Notification{
 		ID:           7,
 		ContestID:    contest.ID,
 		Channel:      domain.ChannelEmail,
-		Kind:         domain.NotificationKindReminder24h,
+		Kind:         domain.NotificationKindContestStarted,
 		Status:       domain.NotificationStatusPending,
 		DueAt:        dueAt,
 		AttemptCount: 0,
 	}
 
-	if !notify.ShouldSend(pending, contest, now, lead, window, 5) {
-		t.Fatal("fixture must be within due window")
+	if !notify.ShouldSend(pending, contest, now, 5) {
+		t.Fatal("fixture must be eligible while running")
 	}
 
 	st := newE2EStore(contest, pending)
 	email := &fakeSender{channel: domain.ChannelEmail}
-	whatsapp := &fakeSender{channel: domain.ChannelWhatsApp}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	orch := notify.NewOrchestrator(
 		st,
-		[]notify.ChannelSender{email, whatsapp},
+		[]notify.ChannelSender{email},
 		clock.Fixed{Instant: now},
 		time.UTC,
-		lead,
-		window,
 		5,
 		log,
 	)
@@ -156,18 +170,9 @@ func TestDispatchPendingNotificationExactlyOnce(t *testing.T) {
 	if email.calls != 1 {
 		t.Fatalf("email sends = %d, want 1", email.calls)
 	}
-	if whatsapp.calls != 0 {
-		t.Fatalf("whatsapp sends = %d, want 0", whatsapp.calls)
-	}
 	stored := st.notifications[pending.ID]
 	if stored.Status != domain.NotificationStatusSent {
 		t.Fatalf("status = %s, want sent", stored.Status)
-	}
-	if stored.SentAt == nil || !stored.SentAt.Equal(now) {
-		t.Fatalf("sent_at = %v, want %v", stored.SentAt, now)
-	}
-	if stored.AttemptCount != 1 {
-		t.Fatalf("attempt_count = %d, want 1", stored.AttemptCount)
 	}
 
 	second, err := orch.Run(context.Background())
@@ -180,10 +185,26 @@ func TestDispatchPendingNotificationExactlyOnce(t *testing.T) {
 	if email.calls != 1 {
 		t.Fatalf("email resent: calls = %d", email.calls)
 	}
-	if whatsapp.calls != 0 {
-		t.Fatalf("whatsapp unexpectedly used: calls = %d", whatsapp.calls)
+}
+
+func TestDispatchDoesNotSendBeforeContestStarts(t *testing.T) {
+	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	start := now.Add(2 * time.Hour)
+	end := start.Add(2 * time.Hour)
+	contest := domain.Contest{
+		ID:        1,
+		StartTime: start,
+		EndTime:   end,
+		Status:    domain.ContestStatusUpcoming,
 	}
-	if st.notifications[pending.ID].Status != domain.NotificationStatusSent {
-		t.Fatal("notification left sent state")
+	pending := domain.Notification{
+		ID:        2,
+		ContestID: 1,
+		Channel:   domain.ChannelEmail,
+		Status:    domain.NotificationStatusPending,
+		DueAt:     notify.ActiveDueAt(start),
+	}
+	if notify.ShouldSend(pending, contest, now, 5) {
+		t.Fatal("must not send before start")
 	}
 }

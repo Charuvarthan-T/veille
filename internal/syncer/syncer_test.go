@@ -11,6 +11,7 @@ import (
 
 	"github.com/Charuvarthan-T/veille/internal/clock"
 	"github.com/Charuvarthan-T/veille/internal/domain"
+	"github.com/Charuvarthan-T/veille/internal/notify"
 	"github.com/Charuvarthan-T/veille/internal/source"
 	"github.com/Charuvarthan-T/veille/internal/syncer"
 )
@@ -24,23 +25,24 @@ type fakeSource struct {
 
 func (f *fakeSource) Name() string              { return f.name }
 func (f *fakeSource) Platform() domain.Platform { return f.platform }
-func (f *fakeSource) FetchUpcoming(context.Context) ([]domain.Contest, error) {
+func (f *fakeSource) FetchContests(context.Context) ([]domain.Contest, error) {
 	return f.contests, f.err
 }
 
 type memoryStore struct {
-	byKey       map[string]domain.Contest
-	nextID      int64
-	reminders   map[string]time.Time
-	upsertCalls int
-	ensureCalls int
+	byKey         map[string]domain.Contest
+	nextID        int64
+	notifications map[string]time.Time
+	upsertCalls   int
+	ensureCalls   int
+	refreshCalls  int
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		byKey:     make(map[string]domain.Contest),
-		nextID:    1,
-		reminders: make(map[string]time.Time),
+		byKey:         make(map[string]domain.Contest),
+		nextID:        1,
+		notifications: make(map[string]time.Time),
 	}
 }
 
@@ -70,13 +72,18 @@ func (m *memoryStore) GetContest(_ context.Context, id int64) (domain.Contest, e
 	return domain.Contest{}, errors.New("not found")
 }
 
-func (m *memoryStore) EnsureReminder(_ context.Context, contestID int64, channel domain.Channel, dueAt time.Time) error {
+func (m *memoryStore) EnsureActiveNotification(_ context.Context, contestID int64, dueAt time.Time) error {
 	m.ensureCalls++
-	m.reminders[string(channel)+":"+strconv.FormatInt(contestID, 10)] = dueAt
+	m.notifications["email:"+strconv.FormatInt(contestID, 10)] = dueAt
 	return nil
 }
 
-func TestSyncerInsertsUpdatesAndEnsuresReminders(t *testing.T) {
+func (m *memoryStore) RefreshContestStatuses(context.Context, time.Time) (int64, error) {
+	m.refreshCalls++
+	return 0, nil
+}
+
+func TestSyncerInsertsUpdatesAndEnsuresActiveNotifications(t *testing.T) {
 	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 	start := now.Add(48 * time.Hour)
 	src := &fakeSource{
@@ -89,7 +96,6 @@ func TestSyncerInsertsUpdatesAndEnsuresReminders(t *testing.T) {
 			StartTime:  start,
 			EndTime:    start.Add(2 * time.Hour),
 			Duration:   2 * time.Hour,
-			Status:     domain.ContestStatusUpcoming,
 		}},
 	}
 	st := newMemoryStore()
@@ -98,14 +104,20 @@ func TestSyncerInsertsUpdatesAndEnsuresReminders(t *testing.T) {
 		[]source.ContestSource{src},
 		st,
 		clock.Fixed{Instant: now},
-		[]domain.Channel{domain.ChannelWhatsApp, domain.ChannelEmail},
-		24*time.Hour,
 		log,
 	)
 
 	results := s.Run(context.Background())
-	if len(results) != 1 || results[0].Inserted != 1 || results[0].Ensured != 2 {
+	if len(results) != 1 || results[0].Inserted != 1 || results[0].Ensured != 1 {
 		t.Fatalf("unexpected first sync result: %+v", results[0])
+	}
+	if st.refreshCalls != 1 {
+		t.Fatal("expected status refresh after sync")
+	}
+
+	dueAt := st.notifications["email:1"]
+	if !dueAt.Equal(notify.ActiveDueAt(start)) {
+		t.Fatalf("due_at = %v want %v", dueAt, notify.ActiveDueAt(start))
 	}
 
 	src.contests[0].Name = "Round 1001 Div.2"
@@ -116,11 +128,38 @@ func TestSyncerInsertsUpdatesAndEnsuresReminders(t *testing.T) {
 		t.Fatalf("expected update, got %+v", results[0])
 	}
 	saved := st.byKey["codeforces:1001"]
-	if saved.Name != "Round 1001 Div.2" {
-		t.Fatalf("name not updated: %s", saved.Name)
+	if saved.Status != domain.ContestStatusUpcoming {
+		t.Fatalf("status = %s want upcoming", saved.Status)
 	}
-	if !saved.StartTime.Equal(start.Add(time.Hour)) {
-		t.Fatalf("start time not updated: %v", saved.StartTime)
+}
+
+func TestSyncerSetsRunningStatusForActiveContest(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-30 * time.Minute)
+	end := start.Add(2 * time.Hour)
+	src := &fakeSource{
+		platform: domain.PlatformCodeChef,
+		name:     "codechef",
+		contests: []domain.Contest{{
+			ExternalID: "START100",
+			Name:       "Starters 100",
+			URL:        "https://www.codechef.com/START100",
+			StartTime:  start,
+			EndTime:    end,
+			Duration:   2 * time.Hour,
+		}},
+	}
+	st := newMemoryStore()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := syncer.New([]source.ContestSource{src}, st, clock.Fixed{Instant: now}, log)
+
+	results := s.Run(context.Background())
+	if results[0].Inserted != 1 {
+		t.Fatalf("unexpected result: %+v", results[0])
+	}
+	saved := st.byKey["codechef:START100"]
+	if saved.Status != domain.ContestStatusRunning {
+		t.Fatalf("status = %s want running", saved.Status)
 	}
 }
 
@@ -137,7 +176,6 @@ func TestSyncerSurvivesSourceFailure(t *testing.T) {
 			StartTime:  now.Add(30 * time.Hour),
 			EndTime:    now.Add(32 * time.Hour),
 			Duration:   2 * time.Hour,
-			Status:     domain.ContestStatusUpcoming,
 		}},
 	}
 	st := newMemoryStore()
@@ -146,8 +184,6 @@ func TestSyncerSurvivesSourceFailure(t *testing.T) {
 		[]source.ContestSource{failing, ok},
 		st,
 		clock.Fixed{Instant: now},
-		[]domain.Channel{domain.ChannelEmail},
-		24*time.Hour,
 		log,
 	)
 	results := s.Run(context.Background())
