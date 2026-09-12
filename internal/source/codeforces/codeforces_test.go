@@ -7,47 +7,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Charuvarthan-T/veille/internal/domain"
 	"github.com/Charuvarthan-T/veille/internal/source/codeforces"
 )
 
-func TestFetchUpcomingNormalizesBeforePhase(t *testing.T) {
-	start := time.Now().UTC().Add(48 * time.Hour).Unix()
+func TestFetchContestsIncludesUpcomingAndRunning(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	futureStart := now.Add(48 * time.Hour).Unix()
+	runningStart := now.Add(-30 * time.Minute).Unix()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"status":"OK",
 			"result":[
-				{"id":101,"name":"Future Round","phase":"BEFORE","durationSeconds":7200,"startTimeSeconds":` + itoa(start) + `},
+				{"id":101,"name":"Future Round","phase":"BEFORE","durationSeconds":7200,"startTimeSeconds":` + itoa(futureStart) + `},
+				{"id":102,"name":"Live Round","phase":"CODING","durationSeconds":7200,"startTimeSeconds":` + itoa(runningStart) + `},
 				{"id":100,"name":"Finished","phase":"FINISHED","durationSeconds":7200,"startTimeSeconds":100}
 			]
 		}`))
 	}))
 	defer server.Close()
 
-	src := codeforces.NewWithURL(server.Client(), server.URL)
-	contests, err := src.FetchUpcoming(context.Background())
+	src := codeforces.NewWithURLAndClock(server.Client(), server.URL, func() time.Time { return now })
+	contests, err := src.FetchContests(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(contests) != 1 {
-		t.Fatalf("got %d contests, want 1", len(contests))
+	if len(contests) != 2 {
+		t.Fatalf("got %d contests, want 2", len(contests))
 	}
-	if contests[0].ExternalID != "101" {
-		t.Fatalf("external id = %s", contests[0].ExternalID)
+
+	byID := map[string]domain.Contest{}
+	for _, c := range contests {
+		byID[c.ExternalID] = c
 	}
-	if contests[0].URL != "https://codeforces.com/contest/101" {
-		t.Fatalf("url = %s", contests[0].URL)
+	if byID["101"].Status != domain.ContestStatusUpcoming {
+		t.Fatalf("101 status = %s", byID["101"].Status)
+	}
+	if byID["102"].Status != domain.ContestStatusRunning {
+		t.Fatalf("102 status = %s", byID["102"].Status)
+	}
+	if byID["102"].URL != "https://codeforces.com/contest/102" {
+		t.Fatalf("url = %s", byID["102"].URL)
 	}
 }
 
-func TestFetchUpcomingRejectsBadStatus(t *testing.T) {
+func TestFetchContestsExcludesFinishedByTime(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	endedStart := now.Add(-4 * time.Hour).Unix()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status":"OK",
+			"result":[
+				{"id":300,"name":"Ended","phase":"CODING","durationSeconds":7200,"startTimeSeconds":` + itoa(endedStart) + `}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	src := codeforces.NewWithURLAndClock(server.Client(), server.URL, func() time.Time { return now })
+	contests, err := src.FetchContests(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contests) != 0 {
+		t.Fatalf("got %d contests, want 0", len(contests))
+	}
+}
+
+func TestFetchContestsRejectsBadStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"status":"FAILED","comment":"nope"}`))
 	}))
 	defer server.Close()
 
 	src := codeforces.NewWithURL(server.Client(), server.URL)
-	_, err := src.FetchUpcoming(context.Background())
+	_, err := src.FetchContests(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}

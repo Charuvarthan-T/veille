@@ -37,3 +37,17 @@ type Contest struct {
 func (c Contest) IdentityKey() string {
 	return string(c.Platform) + ":" + c.ExternalID
 }
+
+// StatusAt derives contest lifecycle from start/end times and the current instant.
+func StatusAt(now, start, end time.Time) ContestStatus {
+	now = now.UTC()
+	start = start.UTC()
+	end = end.UTC()
+	if now.Before(start) {
+		return ContestStatusUpcoming
+	}
+	if now.Before(end) {
+		return ContestStatusRunning
+	}
+	return ContestStatusFinished
+}

@@ -17,19 +17,29 @@ const defaultURL = "https://codeforces.com/api/contest.list"
 type Source struct {
 	client  *http.Client
 	baseURL string
+	now     func() time.Time
 }
 
 func New(client *http.Client) *Source {
 	return &Source{
 		client:  client,
 		baseURL: defaultURL,
+		now:     func() time.Time { return time.Now().UTC() },
 	}
 }
 
 func NewWithURL(client *http.Client, baseURL string) *Source {
+	return NewWithURLAndClock(client, baseURL, nil)
+}
+
+func NewWithURLAndClock(client *http.Client, baseURL string, now func() time.Time) *Source {
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
 	return &Source{
 		client:  client,
 		baseURL: baseURL,
+		now:     now,
 	}
 }
 
@@ -55,7 +65,7 @@ type apiContest struct {
 	StartTimeSeconds int64  `json:"startTimeSeconds"`
 }
 
-func (s *Source) FetchUpcoming(ctx context.Context) ([]domain.Contest, error) {
+func (s *Source) FetchContests(ctx context.Context) ([]domain.Contest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("codeforces request: %w", err)
@@ -83,20 +93,23 @@ func (s *Source) FetchUpcoming(ctx context.Context) ([]domain.Contest, error) {
 		return nil, fmt.Errorf("codeforces api status %q: %s", parsed.Status, parsed.Comment)
 	}
 
-	now := time.Now().UTC()
+	now := s.now()
 	out := make([]domain.Contest, 0)
 	for _, item := range parsed.Result {
-		if item.Phase != "BEFORE" {
+		switch item.Phase {
+		case "BEFORE", "CODING":
+		default:
 			continue
 		}
 		if item.StartTimeSeconds <= 0 || item.DurationSeconds < 0 {
 			continue
 		}
 		start := time.Unix(item.StartTimeSeconds, 0).UTC()
-		if start.Before(now) {
+		duration := time.Duration(item.DurationSeconds) * time.Second
+		end := start.Add(duration)
+		if !end.After(now) {
 			continue
 		}
-		duration := time.Duration(item.DurationSeconds) * time.Second
 		externalID := strconv.FormatInt(item.ID, 10)
 		out = append(out, domain.Contest{
 			Platform:   domain.PlatformCodeforces,
@@ -104,9 +117,9 @@ func (s *Source) FetchUpcoming(ctx context.Context) ([]domain.Contest, error) {
 			Name:       item.Name,
 			URL:        "https://codeforces.com/contest/" + externalID,
 			StartTime:  start,
-			EndTime:    start.Add(duration),
+			EndTime:    end,
 			Duration:   duration,
-			Status:     domain.ContestStatusUpcoming,
+			Status:     domain.StatusAt(now, start, end),
 		})
 	}
 	return out, nil

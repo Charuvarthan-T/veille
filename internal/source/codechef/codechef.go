@@ -17,19 +17,29 @@ const defaultURL = "https://www.codechef.com/api/list/contests/all"
 type Source struct {
 	client  *http.Client
 	baseURL string
+	now     func() time.Time
 }
 
 func New(client *http.Client) *Source {
 	return &Source{
 		client:  client,
 		baseURL: defaultURL,
+		now:     func() time.Time { return time.Now().UTC() },
 	}
 }
 
 func NewWithURL(client *http.Client, baseURL string) *Source {
+	return NewWithURLAndClock(client, baseURL, nil)
+}
+
+func NewWithURLAndClock(client *http.Client, baseURL string, now func() time.Time) *Source {
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
 	return &Source{
 		client:  client,
 		baseURL: baseURL,
+		now:     now,
 	}
 }
 
@@ -42,8 +52,9 @@ func (s *Source) Platform() domain.Platform {
 }
 
 type apiResponse struct {
-	Status         string       `json:"status"`
-	FutureContests []apiContest `json:"future_contests"`
+	Status          string       `json:"status"`
+	PresentContests []apiContest `json:"present_contests"`
+	FutureContests  []apiContest `json:"future_contests"`
 }
 
 type apiContest struct {
@@ -55,7 +66,7 @@ type apiContest struct {
 	ContestEndDateISO   string `json:"contest_end_date_iso"`
 }
 
-func (s *Source) FetchUpcoming(ctx context.Context) ([]domain.Contest, error) {
+func (s *Source) FetchContests(ctx context.Context) ([]domain.Contest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.baseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("codechef request: %w", err)
@@ -85,12 +96,19 @@ func (s *Source) FetchUpcoming(ctx context.Context) ([]domain.Contest, error) {
 		return nil, fmt.Errorf("codechef api status %q", parsed.Status)
 	}
 
-	now := time.Now().UTC()
-	out := make([]domain.Contest, 0, len(parsed.FutureContests))
-	for _, item := range parsed.FutureContests {
-		if strings.TrimSpace(item.ContestCode) == "" || strings.TrimSpace(item.ContestName) == "" {
+	now := s.now()
+	seen := make(map[string]struct{})
+	out := make([]domain.Contest, 0, len(parsed.PresentContests)+len(parsed.FutureContests))
+	for _, item := range append(parsed.PresentContests, parsed.FutureContests...) {
+		code := strings.TrimSpace(item.ContestCode)
+		if code == "" || strings.TrimSpace(item.ContestName) == "" {
 			continue
 		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+
 		start, err := parseCodeChefTime(item.ContestStartDateISO, item.ContestStartDate)
 		if err != nil {
 			continue
@@ -102,18 +120,18 @@ func (s *Source) FetchUpcoming(ctx context.Context) ([]domain.Contest, error) {
 		if !end.After(start) {
 			continue
 		}
-		if start.Before(now) {
+		if !end.After(now) {
 			continue
 		}
 		out = append(out, domain.Contest{
 			Platform:   domain.PlatformCodeChef,
-			ExternalID: item.ContestCode,
+			ExternalID: code,
 			Name:       item.ContestName,
-			URL:        "https://www.codechef.com/" + item.ContestCode,
+			URL:        "https://www.codechef.com/" + code,
 			StartTime:  start,
 			EndTime:    end,
 			Duration:   end.Sub(start),
-			Status:     domain.ContestStatusUpcoming,
+			Status:     domain.StatusAt(now, start, end),
 		})
 	}
 	return out, nil

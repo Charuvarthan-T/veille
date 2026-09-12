@@ -9,5 +9,5 @@ import (
 type ContestSource interface {
 	Name() string
 	Platform() domain.Platform
-	FetchUpcoming(ctx context.Context) ([]domain.Contest, error)
+	FetchContests(ctx context.Context) ([]domain.Contest, error)
 }
