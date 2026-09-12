@@ -2,8 +2,7 @@ name: veille
 
 on:
   schedule:
-    # Every 5 minutes, offset from minute 0 to reduce schedule congestion.
-    - cron: "2/5 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
