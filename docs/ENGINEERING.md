@@ -8,7 +8,8 @@ It deliberately does not provide a website, mobile app, authentication, multi-us
 
 ## 2. System responsibilities
 
-- `cmd/veille`: process entrypoint. Loads configuration, opens the database, applies migrations, wires dependencies, starts schedulers, and handles graceful shutdown.
+- `cmd/veille`: process entrypoint. Loads configuration, opens the database, applies migrations, wires dependencies, then either runs once (`-once`) or starts the local daemon scheduler.
+- `internal/runner`: one-shot sync+notify pass used by GitHub Actions and manual testing.
 - `internal/config`: reads environment variables and fails fast on missing or invalid values.
 - `internal/domain`: shared contest and notification models, including lifecycle status derivation.
 - `internal/source`: contest source interface plus Codeforces and CodeChef adapters.
@@ -100,10 +101,18 @@ Optional with defaults:
 
 ## 8. Running locally
 
+Daemon mode (continuous scheduler):
+
 ```bash
 cp .env.example .env
 docker compose up -d db
 go run ./cmd/veille
+```
+
+One-shot mode (same path as GitHub Actions):
+
+```bash
+go run ./cmd/veille -once
 ```
 
 For host-run development against Compose Postgres:
@@ -114,7 +123,28 @@ DATABASE_URL=postgres://veille:veille@127.0.0.1:5433/veille?sslmode=disable
 
 ## 9. Deployment notes
 
-Use a Background Worker service (not a web service). The container entrypoint is `/app/veille`. Migrations run on startup.
+### GitHub Actions (production)
+
+The workflow in `.github/workflows/veille.yml` runs every 5 minutes on `ubuntu-latest` and executes:
+
+```bash
+go test ./...
+go build -o bin/veille ./cmd/veille
+./bin/veille -once
+```
+
+Store secrets in the repository settings:
+
+- `DATABASE_URL` (Neon PostgreSQL)
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
+- `EMAIL_TO`
+
+Set `TIMEZONE=Asia/Kolkata` in the workflow env block. Never commit `.env` or secrets to the public repository.
+
+### Docker (optional local/server)
+
+The container entrypoint is `/app/veille`. Pass `-once` for a single pass or run without flags for daemon mode. Migrations run on startup.
 
 Provide all required environment variables at runtime. Do not bake secrets into the image.
 

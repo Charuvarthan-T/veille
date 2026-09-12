@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/Charuvarthan-T/veille/internal/migrate"
 	"github.com/Charuvarthan-T/veille/internal/notify"
 	"github.com/Charuvarthan-T/veille/internal/notify/resend"
+	"github.com/Charuvarthan-T/veille/internal/runner"
 	"github.com/Charuvarthan-T/veille/internal/schedule"
 	"github.com/Charuvarthan-T/veille/internal/source"
 	"github.com/Charuvarthan-T/veille/internal/source/codechef"
@@ -27,6 +30,10 @@ import (
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	onceFlag := flag.Bool("once", false, "run one sync+notify pass and exit")
+	flag.Parse()
+	onceMode := *onceFlag || onceFromEnv()
 
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		logger.Error("failed to load .env", "error", err)
@@ -45,8 +52,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	rootCtx := context.Background()
+	if !onceMode {
+		var stop context.CancelFunc
+		rootCtx, stop = signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+	}
 
 	db, err := postgres.Open(rootCtx, cfg.DatabaseURL)
 	if err != nil {
@@ -87,6 +98,16 @@ func main() {
 		logger,
 	)
 
+	if onceMode {
+		logger.Info("veille one-shot run starting", "timezone", cfg.Timezone)
+		if _, err := runner.Once(rootCtx, contestSyncer, orchestrator, logger); err != nil {
+			logger.Error("one-shot run failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("veille one-shot run finished")
+		return
+	}
+
 	scheduler := schedule.New(logger)
 	scheduler.Every(rootCtx, "collect", cfg.CollectInterval, func(ctx context.Context) error {
 		results := contestSyncer.Run(ctx)
@@ -102,7 +123,7 @@ func main() {
 		return err
 	})
 
-	logger.Info("veille started",
+	logger.Info("veille daemon started",
 		"timezone", cfg.Timezone,
 		"collect_interval", cfg.CollectInterval.String(),
 		"notify_interval", cfg.NotifyInterval.String(),
@@ -128,4 +149,13 @@ func main() {
 	}
 
 	logger.Info("veille stopped")
+}
+
+func onceFromEnv() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VEILLE_ONCE"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
