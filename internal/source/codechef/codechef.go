@@ -18,14 +18,11 @@ type Source struct {
 	client  *http.Client
 	baseURL string
 	now     func() time.Time
+	rated   *ratedChecker
 }
 
 func New(client *http.Client) *Source {
-	return &Source{
-		client:  client,
-		baseURL: defaultURL,
-		now:     func() time.Time { return time.Now().UTC() },
-	}
+	return NewWithURL(client, defaultURL)
 }
 
 func NewWithURL(client *http.Client, baseURL string) *Source {
@@ -40,6 +37,7 @@ func NewWithURLAndClock(client *http.Client, baseURL string, now func() time.Tim
 		client:  client,
 		baseURL: baseURL,
 		now:     now,
+		rated:   newRatedChecker(client, baseURL),
 	}
 }
 
@@ -121,6 +119,13 @@ func (s *Source) FetchContests(ctx context.Context) ([]domain.Contest, error) {
 			continue
 		}
 		if !end.After(now) {
+			continue
+		}
+		rated, err := s.rated.isRated(ctx, code)
+		if err != nil {
+			return nil, err
+		}
+		if !rated {
 			continue
 		}
 		out = append(out, domain.Contest{

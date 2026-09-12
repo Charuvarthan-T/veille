@@ -36,6 +36,7 @@ type memoryStore struct {
 	upsertCalls   int
 	ensureCalls   int
 	refreshCalls  int
+	deleteCalls   int
 }
 
 func newMemoryStore() *memoryStore {
@@ -81,6 +82,19 @@ func (m *memoryStore) EnsureActiveNotification(_ context.Context, contestID int6
 func (m *memoryStore) RefreshContestStatuses(context.Context, time.Time) (int64, error) {
 	m.refreshCalls++
 	return 0, nil
+}
+
+func (m *memoryStore) DeleteFinishedContests(_ context.Context, now time.Time) (int64, error) {
+	m.deleteCalls++
+	var deleted int64
+	for key, c := range m.byKey {
+		if !c.EndTime.After(now) {
+			delete(m.byKey, key)
+			delete(m.notifications, "email:"+strconv.FormatInt(c.ID, 10))
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 func TestSyncerInsertsUpdatesAndEnsuresActiveNotifications(t *testing.T) {
@@ -160,6 +174,57 @@ func TestSyncerSetsRunningStatusForActiveContest(t *testing.T) {
 	saved := st.byKey["codechef:START100"]
 	if saved.Status != domain.ContestStatusRunning {
 		t.Fatalf("status = %s want running", saved.Status)
+	}
+}
+
+func TestSyncerDeletesFinishedContests(t *testing.T) {
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	finishedStart := now.Add(-4 * time.Hour)
+	finishedEnd := now.Add(-1 * time.Hour)
+	runningStart := now.Add(-30 * time.Minute)
+	runningEnd := now.Add(2 * time.Hour)
+
+	st := newMemoryStore()
+	st.byKey["codeforces:999"] = domain.Contest{
+		ID:         1,
+		Platform:   domain.PlatformCodeforces,
+		ExternalID: "999",
+		Name:       "Old Round",
+		StartTime:  finishedStart,
+		EndTime:    finishedEnd,
+		Status:     domain.ContestStatusFinished,
+	}
+	st.byKey["codechef:LIVE"] = domain.Contest{
+		ID:         2,
+		Platform:   domain.PlatformCodeChef,
+		ExternalID: "LIVE",
+		Name:       "Live Starters",
+		StartTime:  runningStart,
+		EndTime:    runningEnd,
+		Status:     domain.ContestStatusRunning,
+	}
+	st.notifications["email:1"] = finishedStart
+
+	src := &fakeSource{
+		platform: domain.PlatformCodeforces,
+		name:     "codeforces",
+		contests: nil,
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := syncer.New([]source.ContestSource{src}, st, clock.Fixed{Instant: now}, log)
+
+	s.Run(context.Background())
+	if _, ok := st.byKey["codeforces:999"]; ok {
+		t.Fatal("finished contest should be deleted")
+	}
+	if _, ok := st.byKey["codechef:LIVE"]; !ok {
+		t.Fatal("running contest should remain")
+	}
+	if _, ok := st.notifications["email:1"]; ok {
+		t.Fatal("notification for deleted contest should be removed")
+	}
+	if st.deleteCalls != 1 {
+		t.Fatalf("deleteCalls = %d want 1", st.deleteCalls)
 	}
 }
 

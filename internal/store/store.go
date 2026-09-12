@@ -11,6 +11,7 @@ type ContestStore interface {
 	UpsertContest(ctx context.Context, contest domain.Contest) (domain.Contest, bool, error)
 	GetContest(ctx context.Context, id int64) (domain.Contest, error)
 	RefreshContestStatuses(ctx context.Context, now time.Time) (int64, error)
+	DeleteFinishedContests(ctx context.Context, now time.Time) (int64, error)
 }
 
 type NotificationStore interface {

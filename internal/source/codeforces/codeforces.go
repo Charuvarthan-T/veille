@@ -110,6 +110,13 @@ func (s *Source) FetchContests(ctx context.Context) ([]domain.Contest, error) {
 		if !end.After(now) {
 			continue
 		}
+		rated, err := s.isRatedContest(ctx, item.ID, item.Phase)
+		if err != nil {
+			return nil, err
+		}
+		if !rated {
+			continue
+		}
 		externalID := strconv.FormatInt(item.ID, 10)
 		out = append(out, domain.Contest{
 			Platform:   domain.PlatformCodeforces,

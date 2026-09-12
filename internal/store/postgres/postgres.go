@@ -147,6 +147,22 @@ WHERE id = $1
 	return out, nil
 }
 
+func (d *DB) DeleteFinishedContests(ctx context.Context, now time.Time) (int64, error) {
+	const query = `
+DELETE FROM contests
+WHERE end_time <= $1
+`
+	res, err := d.sql.ExecContext(ctx, query, now.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("delete finished contests: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func (d *DB) RefreshContestStatuses(ctx context.Context, now time.Time) (int64, error) {
 	const query = `
 UPDATE contests

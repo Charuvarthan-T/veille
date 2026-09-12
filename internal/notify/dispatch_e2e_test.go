@@ -45,6 +45,10 @@ func (s *e2eStore) RefreshContestStatuses(context.Context, time.Time) (int64, er
 	return 0, nil
 }
 
+func (s *e2eStore) DeleteFinishedContests(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
 func (s *e2eStore) ClaimDue(_ context.Context, now time.Time, limit int, maxAttempts int) ([]domain.Notification, error) {
 	var claimed []domain.Notification
 	for _, n := range s.notifications {

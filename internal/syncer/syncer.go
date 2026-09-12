@@ -16,6 +16,7 @@ type ActiveNotificationStore interface {
 	store.ContestStore
 	EnsureActiveNotification(ctx context.Context, contestID int64, dueAt time.Time) error
 	RefreshContestStatuses(ctx context.Context, now time.Time) (int64, error)
+	DeleteFinishedContests(ctx context.Context, now time.Time) (int64, error)
 }
 
 type Syncer struct {
@@ -60,6 +61,13 @@ func (s *Syncer) Run(ctx context.Context) []Result {
 		s.log.Error("refresh contest statuses failed", "error", err)
 	} else if updated > 0 {
 		s.log.Info("contest statuses refreshed", "updated", updated)
+	}
+
+	deleted, err := s.store.DeleteFinishedContests(ctx, now)
+	if err != nil {
+		s.log.Error("delete finished contests failed", "error", err)
+	} else if deleted > 0 {
+		s.log.Info("finished contests deleted", "deleted", deleted)
 	}
 
 	return results

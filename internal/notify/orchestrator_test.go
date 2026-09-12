@@ -36,6 +36,9 @@ func (f *fakeStore) EnsureActiveNotification(context.Context, int64, time.Time) 
 func (f *fakeStore) RefreshContestStatuses(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
+func (f *fakeStore) DeleteFinishedContests(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
 func (f *fakeStore) ClaimDue(context.Context, time.Time, int, int) ([]domain.Notification, error) {
 	f.claimCalls++
 	out := f.claimed

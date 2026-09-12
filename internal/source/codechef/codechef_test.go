@@ -4,12 +4,35 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Charuvarthan-T/veille/internal/domain"
 	"github.com/Charuvarthan-T/veille/internal/source/codechef"
 )
+
+func newCodeChefTestServer(t *testing.T, listPayload string, ratedByCode map[string]bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/api/list/contests/") {
+			_, _ = w.Write([]byte(listPayload))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/contests/") {
+			code := strings.TrimPrefix(r.URL.Path, "/api/contests/")
+			rated := ratedByCode[code]
+			flag := "0"
+			if rated {
+				flag = "1"
+			}
+			_, _ = w.Write([]byte(`{"status":"success","isRatedContest":"` + flag + `"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+}
 
 func TestFetchContestsNormalizesFutureContests(t *testing.T) {
 	start := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Second)
@@ -25,13 +48,10 @@ func TestFetchContestsNormalizesFutureContests(t *testing.T) {
 			}
 		]
 	}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(payload))
-	}))
+	server := newCodeChefTestServer(t, payload, map[string]bool{"START999": true})
 	defer server.Close()
 
-	src := codechef.NewWithURL(server.Client(), server.URL)
+	src := codechef.NewWithURL(server.Client(), server.URL+"/api/list/contests/all")
 	contests, err := src.FetchContests(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +67,33 @@ func TestFetchContestsNormalizesFutureContests(t *testing.T) {
 	}
 	if contests[0].Status != domain.ContestStatusUpcoming {
 		t.Fatalf("status = %s want upcoming", contests[0].Status)
+	}
+}
+
+func TestFetchContestsExcludesUnratedContest(t *testing.T) {
+	start := time.Now().UTC().Add(72 * time.Hour).Truncate(time.Second)
+	end := start.Add(3 * time.Hour)
+	payload := `{
+		"status":"success",
+		"future_contests":[
+			{
+				"contest_code":"PRACTICE1",
+				"contest_name":"Practice",
+				"contest_start_date_iso":"` + start.Format(time.RFC3339) + `",
+				"contest_end_date_iso":"` + end.Format(time.RFC3339) + `"
+			}
+		]
+	}`
+	server := newCodeChefTestServer(t, payload, map[string]bool{"PRACTICE1": false})
+	defer server.Close()
+
+	src := codechef.NewWithURL(server.Client(), server.URL+"/api/list/contests/all")
+	contests, err := src.FetchContests(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contests) != 0 {
+		t.Fatalf("got %d contests, want 0 unrated", len(contests))
 	}
 }
 
@@ -66,12 +113,10 @@ func TestFetchContestsIncludesPresentRunningContest(t *testing.T) {
 		],
 		"future_contests":[]
 	}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(payload))
-	}))
+	server := newCodeChefTestServer(t, payload, map[string]bool{"LIVE100": true})
 	defer server.Close()
 
-	src := codechef.NewWithURL(server.Client(), server.URL)
+	src := codechef.NewWithURL(server.Client(), server.URL+"/api/list/contests/all")
 	contests, err := src.FetchContests(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -108,12 +153,10 @@ func TestFetchContestsDeduplicatesPresentAndFuture(t *testing.T) {
 			}
 		]
 	}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(payload))
-	}))
+	server := newCodeChefTestServer(t, payload, map[string]bool{"DUP1": true})
 	defer server.Close()
 
-	src := codechef.NewWithURL(server.Client(), server.URL)
+	src := codechef.NewWithURL(server.Client(), server.URL+"/api/list/contests/all")
 	contests, err := src.FetchContests(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +172,7 @@ func TestFetchContestsHandlesMalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	src := codechef.NewWithURL(server.Client(), server.URL)
+	src := codechef.NewWithURL(server.Client(), server.URL+"/api/list/contests/all")
 	_, err := src.FetchContests(context.Background())
 	if err == nil {
 		t.Fatal("expected decode error")
