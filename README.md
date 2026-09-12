@@ -2,4 +2,4 @@ well.. veille’s worker basically calls the codeforces and codechef apis, pulls
 
 also, github actions runs this whole flow automatically every hour.
 
-did this so as to solve a problem that face, missing CP contests and later mourning abt it😞
+did this to solve a problem i actually face: missing cp contests without getting notified by mail (the one i actually look into), only realizing it later and mourning over the ones i missed 😞
