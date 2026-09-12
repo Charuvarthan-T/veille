@@ -5,8 +5,7 @@ import "time"
 type Channel string
 
 const (
-	ChannelWhatsApp Channel = "whatsapp"
-	ChannelEmail    Channel = "email"
+	ChannelEmail Channel = "email"
 )
 
 type NotificationStatus string
@@ -21,7 +20,7 @@ const (
 type NotificationKind string
 
 const (
-	NotificationKindReminder24h NotificationKind = "reminder_24h"
+	NotificationKindContestStarted NotificationKind = "contest_started"
 )
 
 type Notification struct {

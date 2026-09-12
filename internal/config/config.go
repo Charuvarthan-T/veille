@@ -13,15 +13,9 @@ type Config struct {
 	Timezone                string
 	CollectInterval         time.Duration
 	NotifyInterval          time.Duration
-	ReminderLead            time.Duration
-	ReminderWindow          time.Duration
 	HTTPTimeout             time.Duration
 	ShutdownTimeout         time.Duration
 	NotificationMaxAttempts int
-	TwilioAccountSID        string
-	TwilioAuthToken         string
-	TwilioWhatsAppFrom      string
-	WhatsAppTo              string
 	ResendAPIKey            string
 	EmailFrom               string
 	EmailTo                 string
@@ -33,15 +27,9 @@ func Load() (Config, error) {
 		Timezone:                envOr("TIMEZONE", "Asia/Kolkata"),
 		CollectInterval:         durationOr("COLLECT_INTERVAL", 15*time.Minute),
 		NotifyInterval:          durationOr("NOTIFY_INTERVAL", 1*time.Minute),
-		ReminderLead:            durationOr("REMINDER_LEAD", 24*time.Hour),
-		ReminderWindow:          durationOr("REMINDER_WINDOW", 24*time.Hour),
 		HTTPTimeout:             durationOr("HTTP_TIMEOUT", 30*time.Second),
 		ShutdownTimeout:         durationOr("SHUTDOWN_TIMEOUT", 20*time.Second),
 		NotificationMaxAttempts: intOr("NOTIFICATION_MAX_ATTEMPTS", 5),
-		TwilioAccountSID:        strings.TrimSpace(os.Getenv("TWILIO_ACCOUNT_SID")),
-		TwilioAuthToken:         strings.TrimSpace(os.Getenv("TWILIO_AUTH_TOKEN")),
-		TwilioWhatsAppFrom:      strings.TrimSpace(os.Getenv("TWILIO_WHATSAPP_FROM")),
-		WhatsAppTo:              strings.TrimSpace(os.Getenv("WHATSAPP_TO")),
 		ResendAPIKey:            strings.TrimSpace(os.Getenv("RESEND_API_KEY")),
 		EmailFrom:               strings.TrimSpace(os.Getenv("EMAIL_FROM")),
 		EmailTo:                 strings.TrimSpace(os.Getenv("EMAIL_TO")),
@@ -56,14 +44,10 @@ func Load() (Config, error) {
 func (c Config) Validate() error {
 	var missing []string
 	required := map[string]string{
-		"DATABASE_URL":         c.DatabaseURL,
-		"TWILIO_ACCOUNT_SID":   c.TwilioAccountSID,
-		"TWILIO_AUTH_TOKEN":    c.TwilioAuthToken,
-		"TWILIO_WHATSAPP_FROM": c.TwilioWhatsAppFrom,
-		"WHATSAPP_TO":          c.WhatsAppTo,
-		"RESEND_API_KEY":       c.ResendAPIKey,
-		"EMAIL_FROM":           c.EmailFrom,
-		"EMAIL_TO":             c.EmailTo,
+		"DATABASE_URL":   c.DatabaseURL,
+		"RESEND_API_KEY": c.ResendAPIKey,
+		"EMAIL_FROM":     c.EmailFrom,
+		"EMAIL_TO":       c.EmailTo,
 	}
 	for name, value := range required {
 		if value == "" {
@@ -84,12 +68,6 @@ func (c Config) Validate() error {
 	}
 	if c.NotifyInterval <= 0 {
 		return fmt.Errorf("NOTIFY_INTERVAL must be positive")
-	}
-	if c.ReminderLead <= 0 {
-		return fmt.Errorf("REMINDER_LEAD must be positive")
-	}
-	if c.ReminderWindow <= 0 {
-		return fmt.Errorf("REMINDER_WINDOW must be positive")
 	}
 	if c.HTTPTimeout <= 0 {
 		return fmt.Errorf("HTTP_TIMEOUT must be positive")
