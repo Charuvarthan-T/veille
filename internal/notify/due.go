@@ -6,33 +6,23 @@ import (
 	"github.com/Charuvarthan-T/veille/internal/domain"
 )
 
-func ReminderDueAt(start time.Time, lead time.Duration) time.Time {
-	return start.UTC().Add(-lead)
+func ActiveDueAt(start time.Time) time.Time {
+	return start.UTC()
 }
 
-func IsWithinReminderWindow(now, start time.Time, lead, window time.Duration) bool {
-	now = now.UTC()
-	start = start.UTC()
-	dueAt := ReminderDueAt(start, lead)
-	if now.Before(dueAt) {
-		return false
-	}
-	if !now.Before(start) {
-		return false
-	}
-	elapsed := now.Sub(dueAt)
-	return elapsed <= window
+func IsContestRunning(now, start, end time.Time) bool {
+	return domain.StatusAt(now, start, end) == domain.ContestStatusRunning
 }
 
-func ShouldSend(n domain.Notification, contest domain.Contest, now time.Time, lead, window time.Duration, maxAttempts int) bool {
+func ShouldSend(n domain.Notification, contest domain.Contest, now time.Time, maxAttempts int) bool {
 	if n.Status == domain.NotificationStatusSent {
 		return false
 	}
 	if n.AttemptCount > maxAttempts {
 		return false
 	}
-	if contest.Status != domain.ContestStatusUpcoming {
+	if !IsContestRunning(now, contest.StartTime, contest.EndTime) {
 		return false
 	}
-	return IsWithinReminderWindow(now, contest.StartTime, lead, window)
+	return !now.Before(n.DueAt.UTC())
 }

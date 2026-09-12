@@ -16,8 +16,6 @@ type Orchestrator struct {
 	senders     map[domain.Channel]ChannelSender
 	clock       clock.Clock
 	location    *time.Location
-	lead        time.Duration
-	window      time.Duration
 	maxAttempts int
 	claimLimit  int
 	staleAfter  time.Duration
@@ -29,7 +27,6 @@ func NewOrchestrator(
 	senders []ChannelSender,
 	clk clock.Clock,
 	location *time.Location,
-	lead, window time.Duration,
 	maxAttempts int,
 	log *slog.Logger,
 ) *Orchestrator {
@@ -42,8 +39,6 @@ func NewOrchestrator(
 		senders:     indexed,
 		clock:       clk,
 		location:    location,
-		lead:        lead,
-		window:      window,
 		maxAttempts: maxAttempts,
 		claimLimit:  50,
 		staleAfter:  10 * time.Minute,
@@ -55,6 +50,7 @@ type DispatchResult struct {
 	Claimed int
 	Sent    int
 	Failed  int
+	Skipped int
 }
 
 func (o *Orchestrator) Run(ctx context.Context) (DispatchResult, error) {
@@ -75,6 +71,15 @@ func (o *Orchestrator) Run(ctx context.Context) (DispatchResult, error) {
 	result := DispatchResult{Claimed: len(claimed)}
 	for _, item := range claimed {
 		if err := o.dispatchOne(ctx, item, now); err != nil {
+			if skipErr, ok := err.(*skipError); ok {
+				result.Skipped++
+				o.log.Info("notification skipped",
+					"notification_id", item.ID,
+					"contest_id", item.ContestID,
+					"reason", skipErr.reason,
+				)
+				continue
+			}
 			result.Failed++
 			o.log.Error("notification dispatch failed",
 				"notification_id", item.ID,
@@ -92,9 +97,18 @@ func (o *Orchestrator) Run(ctx context.Context) (DispatchResult, error) {
 			"claimed", result.Claimed,
 			"sent", result.Sent,
 			"failed", result.Failed,
+			"skipped", result.Skipped,
 		)
 	}
 	return result, nil
+}
+
+type skipError struct {
+	reason string
+}
+
+func (e *skipError) Error() string {
+	return e.reason
 }
 
 func (o *Orchestrator) dispatchOne(ctx context.Context, item domain.Notification, now time.Time) error {
@@ -102,8 +116,12 @@ func (o *Orchestrator) dispatchOne(ctx context.Context, item domain.Notification
 	if err != nil {
 		return err
 	}
-	if !ShouldSend(item, contest, now, o.lead, o.window, o.maxAttempts) {
-		return fmt.Errorf("notification no longer due for contest %d", contest.ID)
+	contest.Status = domain.StatusAt(now, contest.StartTime, contest.EndTime)
+	if !ShouldSend(item, contest, now, o.maxAttempts) {
+		if err := o.store.ReleaseClaim(ctx, item.ID); err != nil {
+			return fmt.Errorf("release ineligible claim: %w", err)
+		}
+		return &skipError{reason: fmt.Sprintf("contest %d not eligible for active notification", contest.ID)}
 	}
 
 	sender, ok := o.senders[item.Channel]
@@ -111,7 +129,7 @@ func (o *Orchestrator) dispatchOne(ctx context.Context, item domain.Notification
 		return fmt.Errorf("no sender configured for channel %s", item.Channel)
 	}
 
-	msg := BuildReminderMessage(contest, o.location)
+	msg := BuildActiveMessage(contest, o.location)
 	if err := sender.Send(ctx, msg); err != nil {
 		return err
 	}

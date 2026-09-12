@@ -34,8 +34,8 @@ CREATE TABLE notifications (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT notifications_contest_channel_kind_uidx UNIQUE (contest_id, channel, kind),
-    CONSTRAINT notifications_channel_check CHECK (channel IN ('whatsapp', 'email')),
-    CONSTRAINT notifications_kind_check CHECK (kind IN ('reminder_24h')),
+    CONSTRAINT notifications_channel_check CHECK (channel IN ('email')),
+    CONSTRAINT notifications_kind_check CHECK (kind IN ('contest_started')),
     CONSTRAINT notifications_status_check CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
     CONSTRAINT notifications_attempt_count_nonneg CHECK (attempt_count >= 0)
 );

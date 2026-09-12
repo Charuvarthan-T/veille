@@ -13,11 +13,9 @@ import (
 
 	"github.com/Charuvarthan-T/veille/internal/clock"
 	"github.com/Charuvarthan-T/veille/internal/config"
-	"github.com/Charuvarthan-T/veille/internal/domain"
 	"github.com/Charuvarthan-T/veille/internal/migrate"
 	"github.com/Charuvarthan-T/veille/internal/notify"
 	"github.com/Charuvarthan-T/veille/internal/notify/resend"
-	"github.com/Charuvarthan-T/veille/internal/notify/twilio"
 	"github.com/Charuvarthan-T/veille/internal/schedule"
 	"github.com/Charuvarthan-T/veille/internal/source"
 	"github.com/Charuvarthan-T/veille/internal/source/codechef"
@@ -74,12 +72,10 @@ func main() {
 		codechef.New(httpClient),
 	}
 
-	channels := []domain.Channel{domain.ChannelWhatsApp, domain.ChannelEmail}
 	clk := clock.System{}
-	contestSyncer := syncer.New(sources, db, clk, channels, cfg.ReminderLead, logger)
+	contestSyncer := syncer.New(sources, db, clk, logger)
 
 	senders := []notify.ChannelSender{
-		twilio.New(httpClient, cfg.TwilioAccountSID, cfg.TwilioAuthToken, cfg.TwilioWhatsAppFrom, cfg.WhatsAppTo),
 		resend.New(httpClient, cfg.ResendAPIKey, cfg.EmailFrom, cfg.EmailTo),
 	}
 	orchestrator := notify.NewOrchestrator(
@@ -87,8 +83,6 @@ func main() {
 		senders,
 		clk,
 		location,
-		cfg.ReminderLead,
-		cfg.ReminderWindow,
 		cfg.NotificationMaxAttempts,
 		logger,
 	)

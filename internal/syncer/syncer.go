@@ -7,39 +7,35 @@ import (
 
 	"github.com/Charuvarthan-T/veille/internal/clock"
 	"github.com/Charuvarthan-T/veille/internal/domain"
+	"github.com/Charuvarthan-T/veille/internal/notify"
 	"github.com/Charuvarthan-T/veille/internal/source"
 	"github.com/Charuvarthan-T/veille/internal/store"
 )
 
-type ReminderStore interface {
+type ActiveNotificationStore interface {
 	store.ContestStore
-	EnsureReminder(ctx context.Context, contestID int64, channel domain.Channel, dueAt time.Time) error
+	EnsureActiveNotification(ctx context.Context, contestID int64, dueAt time.Time) error
+	RefreshContestStatuses(ctx context.Context, now time.Time) (int64, error)
 }
 
 type Syncer struct {
-	sources  []source.ContestSource
-	store    ReminderStore
-	clock    clock.Clock
-	channels []domain.Channel
-	lead     time.Duration
-	log      *slog.Logger
+	sources []source.ContestSource
+	store   ActiveNotificationStore
+	clock   clock.Clock
+	log     *slog.Logger
 }
 
 func New(
 	sources []source.ContestSource,
-	contestStore ReminderStore,
+	contestStore ActiveNotificationStore,
 	clk clock.Clock,
-	channels []domain.Channel,
-	lead time.Duration,
 	log *slog.Logger,
 ) *Syncer {
 	return &Syncer{
-		sources:  sources,
-		store:    contestStore,
-		clock:    clk,
-		channels: channels,
-		lead:     lead,
-		log:      log,
+		sources: sources,
+		store:   contestStore,
+		clock:   clk,
+		log:     log,
 	}
 }
 
@@ -57,6 +53,15 @@ func (s *Syncer) Run(ctx context.Context) []Result {
 	for _, src := range s.sources {
 		results = append(results, s.syncSource(ctx, src))
 	}
+
+	now := s.clock.Now()
+	updated, err := s.store.RefreshContestStatuses(ctx, now)
+	if err != nil {
+		s.log.Error("refresh contest statuses failed", "error", err)
+	} else if updated > 0 {
+		s.log.Info("contest statuses refreshed", "updated", updated)
+	}
+
 	return results
 }
 
@@ -64,7 +69,7 @@ func (s *Syncer) syncSource(ctx context.Context, src source.ContestSource) Resul
 	result := Result{Source: src.Name()}
 	now := s.clock.Now()
 
-	contests, err := src.FetchUpcoming(ctx)
+	contests, err := src.FetchContests(ctx)
 	if err != nil {
 		result.SourceErr = err
 		s.log.Error("contest source failed", "source", src.Name(), "error", err)
@@ -76,9 +81,7 @@ func (s *Syncer) syncSource(ctx context.Context, src source.ContestSource) Resul
 		contest.Platform = src.Platform()
 		contest.FirstSeenAt = now
 		contest.LastSeenAt = now
-		if contest.Status == "" {
-			contest.Status = domain.ContestStatusUpcoming
-		}
+		contest.Status = domain.StatusAt(now, contest.StartTime, contest.EndTime)
 
 		saved, inserted, err := s.store.UpsertContest(ctx, contest)
 		if err != nil {
@@ -91,14 +94,12 @@ func (s *Syncer) syncSource(ctx context.Context, src source.ContestSource) Resul
 			result.Updated++
 		}
 
-		dueAt := saved.StartTime.Add(-s.lead)
-		for _, channel := range s.channels {
-			if err := s.store.EnsureReminder(ctx, saved.ID, channel, dueAt); err != nil {
-				s.log.Error("ensure reminder failed", "contest_id", saved.ID, "channel", channel, "error", err)
-				continue
-			}
-			result.Ensured++
+		dueAt := notify.ActiveDueAt(saved.StartTime)
+		if err := s.store.EnsureActiveNotification(ctx, saved.ID, dueAt); err != nil {
+			s.log.Error("ensure active notification failed", "contest_id", saved.ID, "error", err)
+			continue
 		}
+		result.Ensured++
 	}
 
 	s.log.Info("contest source synchronized",
@@ -106,7 +107,7 @@ func (s *Syncer) syncSource(ctx context.Context, src source.ContestSource) Resul
 		"fetched", result.Fetched,
 		"inserted", result.Inserted,
 		"updated", result.Updated,
-		"reminders_ensured", result.Ensured,
+		"notifications_ensured", result.Ensured,
 	)
 	return result
 }

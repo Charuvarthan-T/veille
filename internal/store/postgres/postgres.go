@@ -147,18 +147,45 @@ WHERE id = $1
 	return out, nil
 }
 
-func (d *DB) EnsureReminder(ctx context.Context, contestID int64, channel domain.Channel, dueAt time.Time) error {
+func (d *DB) RefreshContestStatuses(ctx context.Context, now time.Time) (int64, error) {
+	const query = `
+UPDATE contests
+SET status = CASE
+    WHEN $1 < start_time THEN 'upcoming'
+    WHEN $1 < end_time THEN 'running'
+    ELSE 'finished'
+END,
+updated_at = NOW()
+WHERE status IN ('upcoming', 'running')
+  AND (
+    (status = 'upcoming' AND $1 >= start_time)
+    OR (status = 'running' AND $1 >= end_time)
+    OR (status = 'upcoming' AND $1 >= start_time AND $1 < end_time)
+  )
+`
+	res, err := d.sql.ExecContext(ctx, query, now.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("refresh contest statuses: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (d *DB) EnsureActiveNotification(ctx context.Context, contestID int64, dueAt time.Time) error {
 	const query = `
 INSERT INTO notifications (contest_id, channel, kind, status, due_at, created_at, updated_at)
-VALUES ($1, $2, 'reminder_24h', 'pending', $3, NOW(), NOW())
+VALUES ($1, 'email', 'contest_started', 'pending', $2, NOW(), NOW())
 ON CONFLICT (contest_id, channel, kind) DO UPDATE SET
     due_at = EXCLUDED.due_at,
     updated_at = NOW()
 WHERE notifications.status <> 'sent'
 `
-	_, err := d.sql.ExecContext(ctx, query, contestID, channel, dueAt.UTC())
+	_, err := d.sql.ExecContext(ctx, query, contestID, dueAt.UTC())
 	if err != nil {
-		return fmt.Errorf("ensure reminder: %w", err)
+		return fmt.Errorf("ensure active notification: %w", err)
 	}
 	return nil
 }
@@ -178,8 +205,8 @@ WITH due AS (
     WHERE n.status IN ('pending', 'failed')
       AND n.attempt_count < $2
       AND n.due_at <= $1
-      AND c.start_time > $1
-      AND c.status = 'upcoming'
+      AND c.start_time <= $1
+      AND c.end_time > $1
     ORDER BY n.due_at ASC
     FOR UPDATE OF n SKIP LOCKED
     LIMIT $3
@@ -262,6 +289,23 @@ WHERE id = $1
 	_, err := d.sql.ExecContext(ctx, query, id, errMsg)
 	if err != nil {
 		return fmt.Errorf("mark notification failed: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) ReleaseClaim(ctx context.Context, id int64) error {
+	const query = `
+UPDATE notifications
+SET status = 'pending',
+    attempt_count = GREATEST(attempt_count - 1, 0),
+    last_error = '',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'sending'
+`
+	_, err := d.sql.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("release claim: %w", err)
 	}
 	return nil
 }
