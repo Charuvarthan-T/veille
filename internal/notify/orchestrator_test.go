@@ -14,14 +14,14 @@ import (
 )
 
 type fakeStore struct {
-	contest       domain.Contest
-	claimed       []domain.Notification
-	sentIDs       []int64
-	failedIDs     []int64
-	releasedIDs   []int64
-	claimCalls    int
-	releaseCalls  int
-	releaseStale  int
+	contest      domain.Contest
+	claimed      []domain.Notification
+	sentIDs      []int64
+	failedIDs    []int64
+	releasedIDs  []int64
+	claimCalls   int
+	releaseCalls int
+	releaseStale int
 }
 
 func (f *fakeStore) UpsertContest(context.Context, domain.Contest) (domain.Contest, bool, error) {
